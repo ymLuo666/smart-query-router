@@ -1,0 +1,20 @@
+# Smart Query Router - Requirements
+# Python 3.8+ required
+
+# Core Dependencies
+torch>=2.0.0
+transformers>=4.30.0
+peft>=0.4.0
+sentence-transformers>=2.2.0
+numpy>=1.24.0
+
+# Web Search Support
+openai==0.27.6
+
+# Optional Dependencies for Better Performance
+accelerate>=0.20.0
+bitsandbytes>=0.39.0
+
+# Additional utilities
+tqdm>=4.65.0
+safetensors>=0.3.0
