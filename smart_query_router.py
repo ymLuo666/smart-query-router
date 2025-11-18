@@ -11,6 +11,7 @@ from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel, PeftConfig
 import openai
+import atexit
 
 
 class SmartQueryRouter:
@@ -22,7 +23,7 @@ class SmartQueryRouter:
         self,
         embedding_model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
         similarity_threshold: float = 0.6,
-        device: str = None
+        device: str | None = None
     ):
         """
         初始化路由器
@@ -32,7 +33,8 @@ class SmartQueryRouter:
             similarity_threshold: 相似度阈值，低于此值将使用Web搜索
             device: 计算设备 (cuda/cpu)
         """
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f"Using device: {self.device}")
         
         # 加载embedding模型
@@ -47,6 +49,10 @@ class SmartQueryRouter:
         
         # 相似度阈值
         self.similarity_threshold = similarity_threshold
+        atexit.register(self.exit)
+
+    def exit(self):
+        self.unload_all_slms()
         
     def register_slm(
         self,
@@ -314,7 +320,7 @@ Background Information:"""
             import openai
             
             # Configure API credentials
-            api_key = os.getenv("QIANWEN_API_KEY", "xxx")
+            api_key = os.getenv('QIANWEN_API_KEY', os.getenv("DASHSCOPE_API_KEY", "xxx"))
             openai.api_key = api_key
             openai.api_base = "https://dashscope.aliyuncs.com/compatible-mode/v1"
             

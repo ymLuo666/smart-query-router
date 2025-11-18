@@ -18,7 +18,7 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 SIMILARITY_THRESHOLD = 0.6
 
 # 计算设备
-DEVICE = "cuda"  # 或 "cpu"
+DEVICE = None  # "cpu" (default), or 'cuda'
 
 # ============================================================================
 # SLM领域配置
