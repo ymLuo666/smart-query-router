@@ -186,8 +186,9 @@ class SmartQueryRouter:
         return similarity
     
     def normalized(self, similarity: dict):
-        max_val = max(similarity.values())
-        similarity = {k: v + max_val for k, v in similarity.items()}
+        print(similarity)
+        max_val = max(abs(v) for v in similarity.values())
+        similarity = {k: v + max_val + 0.01 for k, v in similarity.items()} # 0.01 to avoid 0 in prob.
 
         sum_val = sum(similarity.values())
         
@@ -223,7 +224,7 @@ class SmartQueryRouter:
         similarities = self.normalized(similarities)
         for domain_name, similarity in similarities.items():
             print(f"  - {domain_name}: {similarity:.4f}")
-        
+
         best_domain = max(similarities, key=similarities.get)
         best_similarity = similarities[best_domain]
         

@@ -58,11 +58,11 @@ def main(queries):
     
 if __name__ == "__main__":
     queries = [
-        "What are the symptoms of COVID-19?",  # 医疗领域
+        # "What are the symptoms of COVID-19?",  # 医疗领域
         # "How to invest in the stock market?",  # 金融领域
         # "What is a patent?",  # 法律领域
         # "Explain neural networks",  # 技术领域
-        # "Best recipe for chocolate cake"  # 不属于任何领域 -> Web搜索
+        "Best recipe for chocolate cake"  # 不属于任何领域 -> Web搜索
     ]
 
     conversations = main(queries)
