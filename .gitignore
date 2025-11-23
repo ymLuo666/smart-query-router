@@ -79,3 +79,4 @@ outputs/
 *.tmp
 tmp/
 temp/
+output/

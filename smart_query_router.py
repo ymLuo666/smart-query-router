@@ -185,6 +185,15 @@ class SmartQueryRouter:
         
         return similarity
     
+    def normalized(self, similarity: dict):
+        max_val = max(similarity.values())
+        similarity = {k: v + max_val for k, v in similarity.items()}
+
+        sum_val = sum(similarity.values())
+        
+        return {k: v / sum_val for k, v in similarity.items()}
+
+    
     def select_best_slm(self, query: str) -> Tuple[Optional[str], float, Dict[str, float]]:
         """
         选择最适合处理query的SLM
@@ -206,11 +215,14 @@ class SmartQueryRouter:
         for domain_name, domain_embedding in self.slm_embeddings.items():
             similarity = self.calculate_similarity(query_embedding, domain_embedding)
             similarities[domain_name] = similarity
-            print(f"  - {domain_name}: {similarity:.4f}")
-        
+
         # 找出最高相似度
         if not similarities:
             return None, 0.0, {}
+
+        similarities = self.normalized(similarities)
+        for domain_name, similarity in similarities.items():
+            print(f"  - {domain_name}: {similarity:.4f}")
         
         best_domain = max(similarities, key=similarities.get)
         best_similarity = similarities[best_domain]
@@ -378,7 +390,7 @@ Background Information:"""
         
         # 选择最佳SLM
         selected_domain, similarity, all_similarities = self.select_best_slm(query)
-        
+
         # 生成背景信息
         if selected_domain is not None:
             # 使用选中的SLM生成背景信息

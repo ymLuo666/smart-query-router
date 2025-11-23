@@ -2,6 +2,8 @@ from smart_query_router import SmartQueryRouter
 import config
 from factuality import FactualChecker
 from chat import chat
+import os
+import json
 
 
 _PREVIEW_LEN = 100
@@ -24,7 +26,7 @@ def main(queries):
             domain_description=domain_config["domain_description"]
         )
 
-    answers = []
+    conversation = []
     
     for i, query in enumerate(queries, 1):
         result = router.process_query(
@@ -33,35 +35,40 @@ def main(queries):
         )
 
         print(f'Query {i}: {query[:_PREVIEW_LEN]}{'...' if len(query) >= _PREVIEW_LEN else ''}')
-        print(f"Selected Domain: {result['selected_domain'] or 'None (Web Search)'}")
-        print(f"Similarity Score: {result['similarity_score']:.4f}", end='\n\n')
+        print(f"Selected Domain: {result['selected_domain'] or 'None (Web Search)'}", end='\n\n')
         
         print("[Similarity Scores for All Domains]")
         for domain, score in result['all_similarities'].items():
             print(f"  {domain}: {score:.4f}")
         
         print(f'Preview: {result['background_info'][:_PREVIEW_LEN]}{'...' if len(result['background_info']) >= _PREVIEW_LEN else ''}')
-        print('[Factuality]: checking if expanded query is valid')
+        print('[Factuality]: Checking if expanded query is valid')
         
         is_valid = checker.factuality_check(result['enhanced_query'])
-        print(f'The Expanded Query is: {is_valid}')
+        print(f'The Expanded Query is {"Valid" if is_valid else "Invalid"}')
 
         new_query = result['enhanced_query'] if is_valid else query
         answer: str = chat(new_query)
 
         print(f'[Answer]\n{answer[:2*_PREVIEW_LEN]}{'...' if len(answer) >= 2*_PREVIEW_LEN else ''}', end='\n\n')
 
-        answers.append(answer)
+        conversation.append((query, answer))
         
-    return answers
-        
+    return conversation
+    
 if __name__ == "__main__":
     queries = [
         "What are the symptoms of COVID-19?",  # 医疗领域
-        "How to invest in the stock market?",  # 金融领域
-        "What is a patent?",  # 法律领域
-        "Explain neural networks",  # 技术领域
-        "Best recipe for chocolate cake"  # 不属于任何领域 -> Web搜索
+        # "How to invest in the stock market?",  # 金融领域
+        # "What is a patent?",  # 法律领域
+        # "Explain neural networks",  # 技术领域
+        # "Best recipe for chocolate cake"  # 不属于任何领域 -> Web搜索
     ]
 
-    answers = main(queries)
+    conversations = main(queries)
+
+    os.makedirs('output/', exist_ok=True)
+    with open('output/result.txt', 'a') as output:
+        for query, answer in conversations:
+            out_format = {'query': query, 'answer': answer}
+            json.dump(out_format, fp=output)

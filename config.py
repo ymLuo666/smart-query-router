@@ -15,7 +15,7 @@ EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 # 相似度阈值 (0-1)
 # 低于此阈值将使用Web搜索而不是SLM
-SIMILARITY_THRESHOLD = 0.6
+SIMILARITY_THRESHOLD = 0.2
 
 # 计算设备
 DEVICE = None  # "cpu" (default), or 'cuda'
