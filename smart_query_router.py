@@ -34,7 +34,7 @@ class SmartQueryRouter:
             device: 计算设备 (cuda/cpu)
         """
         # self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = device or 'cuda' if torch.cuda.is_available() else 'cpu'
         print(f"Using device: {self.device}")
         
         # 加载embedding模型
@@ -87,6 +87,41 @@ class SmartQueryRouter:
         self.slm_embeddings[domain_name] = domain_embedding
         
         print(f"Domain '{domain_name}' registered successfully")
+
+    def register_slm_v2(
+            self,
+            domain_name: str,
+            base_model_id: str,
+            lora_weights_path: str,
+            domain_description_list: list
+        ):
+            """
+            注册一个领域专家SLM
+            
+            Args:
+                domain_name: 领域名称 (e.g., "medical", "finance", "legal", "tech")
+                base_model_id: 基础模型的HuggingFace ID
+                lora_weights_path: LoRA权重路径
+                domain_description: 领域描述，用于生成domain embedding
+            """
+            print(f"Registering SLM for domain: {domain_name}")
+
+            self.slm_configs[domain_name] = {
+                "base_model_id": base_model_id,
+                "lora_weights_path": lora_weights_path,
+                "domain_description": domain_description_list
+            }
+            
+            # 生成domain embedding (基于领域描述)
+            domain_embedding = [self.embedding_model.encode(
+                domain_d,
+                convert_to_tensor=True,
+                device=self.device
+            ) for domain_d in domain_description_list]
+
+            self.slm_embeddings[domain_name] = domain_embedding
+            
+            print(f"Domain '{domain_name}' registered successfully")
         
     def load_slm(self, domain_name: str):
         """
@@ -185,13 +220,14 @@ class SmartQueryRouter:
         
         return similarity
     
-    def normalized(self, similarity: dict):
-        print(similarity)
-        max_val = max(abs(v) for v in similarity.values())
-        similarity = {k: v + max_val + 0.01 for k, v in similarity.items()} # 0.01 to avoid 0 in prob.
+    def normalized(self, similarity: dict) -> dict[str, float]:
+        # print(similarity)
+        min_val = min(similarity.values())
+        min_val = min(min_val, 0)
+        similarity = {k: v + min_val + 0.00001 for k, v in similarity.items()} # 0.01 to avoid 0 in prob.
 
         sum_val = sum(similarity.values())
-        
+
         return {k: v / sum_val for k, v in similarity.items()}
 
     
@@ -217,6 +253,8 @@ class SmartQueryRouter:
             similarity = self.calculate_similarity(query_embedding, domain_embedding)
             similarities[domain_name] = similarity
 
+            print(f'{query=}, {domain_name=}, {similarity=}')
+
         # 找出最高相似度
         if not similarities:
             return None, 0.0, {}
@@ -225,7 +263,10 @@ class SmartQueryRouter:
         for domain_name, similarity in similarities.items():
             print(f"  - {domain_name}: {similarity:.4f}")
 
-        best_domain = max(similarities, key=similarities.get)
+        # Find best domain expert regarding similarity
+        best_domain, best_similarity = max(similarities.items(), key=lambda x: x[1])
+
+        assert best_domain is not None
         best_similarity = similarities[best_domain]
         
         # 判断是否超过阈值
@@ -236,6 +277,91 @@ class SmartQueryRouter:
         
         print(f"\n[Selection] Selected domain: {best_domain} (similarity: {best_similarity:.4f})")
         return best_domain, best_similarity, similarities
+    
+    def remove_unrelated(self, similarity: dict[str, int]):
+        result = {}
+
+        for k, sim in similarity.items():
+            if sim < 0.8:
+                result[k] = 0
+                continue
+
+            result[k] = sim
+
+        return result
+    
+    def select_best_slm_v2(self, query: str) -> Tuple[Optional[str], float, Dict[str, float]]:
+        """
+        选择最适合处理query的SLM
+        
+        Args:
+            query: 用户输入的查询
+            
+        Returns:
+            (选中的domain名称, 最高相似度分数, 所有domain的相似度分数字典)
+        """
+        # 步骤1: 获取query embedding
+        print(f"\n[Step 1] Encoding query to embedding...")
+        query_embedding = self.get_query_embedding(query)
+        
+        # 步骤2 & 3: 计算与所有domain的相似度
+        print(f"[Step 2&3] Calculating similarity with all registered SLMs...")
+        similarities = {}
+
+        def calculate_similarity_v2(
+            query_embedding: torch.Tensor,
+            domain_embedding_list: list[torch.Tensor]
+        ) -> float:
+            """
+            计算query embedding和domain embedding的余弦相似度
+            
+            Args:
+                query_embedding: query的embedding
+                domain_embedding: domain的embedding
+                
+            Returns:
+                相似度分数 (0-1)
+            """
+            # 计算余弦相似度
+            similarity: list = [torch.nn.functional.cosine_similarity(
+                query_embedding.unsqueeze(0),
+                domain_embedding.unsqueeze(0)
+            ).item() for domain_embedding in domain_embedding_list]
+            
+            return sum(similarity)
+
+
+        
+        for domain_name, domain_embedding_list in self.slm_embeddings.items():
+            similarity = calculate_similarity_v2(query_embedding, domain_embedding_list)
+            similarities[domain_name] = similarity
+
+            print(f'{query=}, {domain_name=}, {similarity=}')
+
+        # 找出最高相似度
+        if not similarities:
+            return None, 0.0, {}
+
+        similarities = self.remove_unrelated(similarities)
+        similarities = self.normalized(similarities)
+        for domain_name, similarity in similarities.items():
+            print(f"  - {domain_name}: {similarity:.4f}")
+
+        # Find best domain expert regarding similarity
+        best_domain, best_similarity = max(similarities.items(), key=lambda x: x[1])
+
+        assert best_domain is not None
+        best_similarity = similarities[best_domain]
+        
+        # 判断是否超过阈值
+        if best_similarity < self.similarity_threshold:
+            print(f"\n[Selection] Best similarity ({best_similarity:.4f}) below threshold ({self.similarity_threshold})")
+            print(f"[Selection] Will use Web Search instead")
+            return None, best_similarity, similarities
+        
+        print(f"\n[Selection] Selected domain: {best_domain} (similarity: {best_similarity:.4f})")
+        return best_domain, best_similarity, similarities
+
     
     def generate_background_info(
         self,
@@ -390,7 +516,7 @@ Background Information:"""
         print("="*80)
         
         # 选择最佳SLM
-        selected_domain, similarity, all_similarities = self.select_best_slm(query)
+        selected_domain, similarity, all_similarities = self.select_best_slm_v2(query)
 
         # 生成背景信息
         if selected_domain is not None:
@@ -450,6 +576,9 @@ Please answer the original query considering the background information provided
         """
         卸载所有已加载的SLM
         """
+        if not self.loaded_models:
+            return 
+        
         for domain_name in list(self.loaded_models.keys()):
             self.unload_slm(domain_name)
         print("All SLMs unloaded")
@@ -469,44 +598,70 @@ def main():
     # 注意：您需要替换为实际的模型ID和LoRA权重路径
     
     # 1. 医疗领域
-    router.register_slm(
+    router.register_slm_v2(
         domain_name="medical",
         base_model_id = "Qwen/Qwen2.5-1.5B-Instruct",  # 替换为您的模型ID
         lora_weights_path = "Arthur-77/QWEN2.5-1.5B-medical-finetuned",  # 替换为您的LoRA权重路径
-        domain_description="Medical and healthcare domain, including diseases, treatments, medications, medical procedures, anatomy, physiology, and clinical practices"
+        domain_description_list=['possesses deep knowledge of diseases, treatments, medications, medical procedures, anatomy, physiology, and clinical practices',
+                                 'capable of analyzing complex patient presentations and medical histories to identify likely conditions',
+                                   'understands the mechanisms, interactions, and evidence-based applications of pharmaceuticals and therapies',
+                                     'expert in interpreting diagnostic results, from lab values to medical imaging',
+                                     'proficient in following and explaining clinical guidelines, best practices, and standard-of-care protocols',
+                                       'maintains a current, evidence-based understanding of the latest medical research and advancements',
+                                         'skilled in risk assessment, differential diagnosis, and tailoring treatment plans to individual patient factors'
+                                         ]
     )
     
     # 2. 金融领域
-    router.register_slm(
+    router.register_slm_v2(
         domain_name="finance",
-        base_model_id = "WiroAI/WiroAI-Finance-Qwen-1.5B",
-        lora_weights_path = "",
-        domain_description="Finance and economics domain, including stock market, investments, banking, financial analysis, cryptocurrency, trading, and economic theories"
+        base_model_id = "Qwen/Qwen2.5-1.5B-Instruct",
+        lora_weights_path = "WiroAI/WiroAI-Finance-Qwen-1.5B",
+        domain_description_list=['possesses comprehensive knowledge of stock markets, investments, banking, financial analysis, cryptocurrency, trading, and economic theories',
+'capable of analyzing market trends, financial statements, and macroeconomic indicators',
+'understands the principles, risks, and strategies behind various asset classes and investment vehicles',
+'expert in interpreting financial data, valuation models, and performance metrics',
+'proficient in applying financial regulations, compliance standards, and trading protocols',
+'maintains a current understanding of global economic events and their market implications',
+'skilled in portfolio construction, risk management, and financial forecasting']
     )
     
-    # 3. 法律领域
-    router.register_slm(
+    # 3. Math
+    router.register_slm_v2(
         domain_name="math",
-        base_model_id="Qwen/Qwen2.5-Math-1.5B-Instruct",
-        lora_weights_path="",
-        domain_description="Mathematics domain, including algebra, calculus, geometry, statistics, mathematical reasoning, problem solving, equations, and quantitative analysis"
+        base_model_id="Qwen/Qwen2.5-1.5B-Instruct",
+        lora_weights_path="Erlanggaa/qwen1.5b",
+        domain_description_list=['possesses comprehensive knowledge of algebra, calculus, geometry, statistics, mathematical reasoning, problem solving, equations, and quantitative analysis',
+ 'capable of analyzing complex mathematical structures, proofs, and real-world problem scenarios',
+ 'understands the foundational principles, theorems, and applications across diverse mathematical branches',
+ 'expert in constructing formal proofs, interpreting statistical models, and solving intricate equations',
+ 'proficient in applying logical reasoning, algorithmic thinking, and rigorous analytical methodologies',
+ 'maintains a deep understanding of both pure theoretical concepts and practical computational techniques',
+ 'skilled in abstract reasoning, quantitative modeling, and translating problems into mathematical frameworks']
     )
     
     # 4. 技术领域
-    router.register_slm(
+    router.register_slm_v2(
         domain_name="technology",
-        base_model_id = "Qwen/Qwen2.5-Coder-1.5B-Instruct",
-        lora_weights_path = "",
-        domain_description="Technology domain, including programming, software development, artificial intelligence, machine learning, computer science, algorithms, and technical systems"
+        base_model_id = "Qwen/Qwen2.5-1.5B-Instruct",
+        lora_weights_path = "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        domain_description_list=['possesses deep expertise in machine learning algorithms, neural network architectures, deep learning frameworks, and AI model development',
+ 'capable of designing, training, and deploying models for supervised, unsupervised, and reinforcement learning tasks',
+ 'understands the mathematical foundations including linear algebra, calculus, probability theory, and statistical inference underlying ML systems',
+ 'expert in feature engineering, model selection, hyperparameter tuning, and addressing overfitting, underfitting, and bias-variance tradeoffs',
+ 'proficient in modern ML frameworks and libraries such as TensorFlow, PyTorch, scikit-learn, and tools for distributed training and model serving',
+ 'maintains current knowledge of state-of-the-art research, including transformer architectures, diffusion models, large language models, and multimodal AI systems',
+ 'skilled in MLOps practices, experiment tracking, model evaluation metrics, data pipeline construction, and production deployment of AI systems',
+ 'understands ethical considerations, fairness, interpretability, and responsible AI practices in model development and deployment']
     )
     
     # 测试不同类型的查询
     test_queries = [
         "What are the symptoms and treatment options for type 2 diabetes?",
         "How does the Federal Reserve's interest rate decision affect the stock market?",
-        "What are the legal implications of breaking a non-compete agreement?",
+        "Explain the relationship between the Fundamental Theorem of Calculus and the concept of antiderivatives",
         "Explain the difference between supervised and unsupervised learning in machine learning",
-        "What is the best way to cook pasta?"  # 不属于任何领域，应该使用Web搜索
+        "How to clean toilet?"  # 不属于任何领域，应该使用Web搜索
     ]
     
     for query in test_queries:
