@@ -79,3 +79,7 @@ outputs/
 *.tmp
 tmp/
 temp/
+output/
+
+models*
+result/
